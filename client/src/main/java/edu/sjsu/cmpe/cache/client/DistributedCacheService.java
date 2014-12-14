@@ -51,7 +51,7 @@ public class DistributedCacheService implements CacheServiceInterface {
             System.err.println(e);
         }
 
-        if (response.getCode() != 200) {
+        if (response.getStatus() != 200) {
             System.out.println("Failed to add to the cache.");
         }
     }
