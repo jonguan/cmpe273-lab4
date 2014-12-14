@@ -54,6 +54,7 @@ public class CacheResource {
         Entry entry = new Entry();
         entry.setKey(key.get());
         entry.setValue(value);
+        System.out.println("value is " + value);
 
         cache.save(entry);
 

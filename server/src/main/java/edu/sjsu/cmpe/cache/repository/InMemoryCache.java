@@ -20,7 +20,10 @@ public class InMemoryCache implements CacheInterface {
     @Override
     public Entry save(Entry newEntry) {
         checkNotNull(newEntry, "newEntry instance must not be null");
-        inMemoryMap.putIfAbsent(newEntry.getKey(), newEntry);
+        inMemoryMap.put(newEntry.getKey(), newEntry);
+        Entry newValue = inMemoryMap.get(newEntry.getKey());
+        System.out.println("insert value is " + newEntry.getValue());
+        System.out.println("cache value is " + newValue.getValue());
 
         return newEntry;
     }
