@@ -27,37 +27,33 @@ public class CRDTClient  {
         servers.add("http://localhost:3002");
     }
 
-
-    public boolean put(long key, String value) {
-//        final CountDownLatch countDownLatch = new CountDownLatch(servers.size());
-
-        successCount = new AtomicInteger();
-        for (final String serverUrl : servers) {
-            HttpResponse<JsonNode> response = null;
-            try {
-                response = Unirest
-                        .put(serverUrl + "/cache/{key}/{value}")
-                        .header("accept", "application/json")
-                        .routeParam("key", Long.toString(key))
-                        .routeParam("value", value).asJson();
-            } catch (UnirestException e) {
-                System.err.println(e);
-            }
-
-            if (response.getCode() != 200) {
-                System.out.println("Failed to add to the cache.");
-            } else {
-                System.out.println("Added " + value + "to " + serverUrl);
-                successCount.incrementAndGet();
-            }
-
-//            countDownLatch.countDown();
-        }
-
-//        countDownLatch.await();
-
-        return (Math.round(successCount.floatValue() / servers.size()) == 1);
-    }
+// Syncrhonous implementation
+//    public boolean put(long key, String value) {
+//
+//        successCount = new AtomicInteger();
+//        for (final String serverUrl : servers) {
+//            HttpResponse<JsonNode> response = null;
+//            try {
+//                response = Unirest
+//                        .put(serverUrl + "/cache/{key}/{value}")
+//                        .header("accept", "application/json")
+//                        .routeParam("key", Long.toString(key))
+//                        .routeParam("value", value).asJson();
+//            } catch (UnirestException e) {
+//                System.err.println(e);
+//            }
+//
+//            if (response.getCode() != 200) {
+//                System.out.println("Failed to add to the cache.");
+//            } else {
+//                System.out.println("Added " + value + " to " + serverUrl);
+//                successCount.incrementAndGet();
+//            }
+//
+//        }
+//
+//        return (Math.round(successCount.floatValue() / servers.size()) == 1);
+//    }
 
 
     public String get(long key) {
@@ -74,43 +70,43 @@ public class CRDTClient  {
         return value;
     }
 
-//    public boolean put(long key, String value) {
-//        final CountDownLatch countDownLatch = new CountDownLatch(servers.size());
-//        successCount = new AtomicInteger();
-//
-//        for (final String serverUrl : servers) {
-//            Future<HttpResponse<JsonNode>> future = Unirest.post(serverUrl + "/cache/{key}/{value}")
-//                    .header("accept", "application/json")
-//                    .routeParam("key", Long.toString(key))
-//                    .routeParam("value", value).asJson()
-//                    .asJsonAsync(new Callback<JsonNode>() {
-//
-//                        public void failed(UnirestException e) {
-//                            System.out.println("The request has failed: " + serverUrl);
-//                            countDownLatch.countDown();
-//                        }
-//
-//                        public void completed(HttpResponse<JsonNode> response) {
-//                            int code = response.getStatus();
-//                            if (code == 200) {
-//                                successCount.incrementAndGet();
-//                            }
-//
-//                            countDownLatch.countDown();
-//                        }
-//
-//                        public void cancelled() {
-//                            System.out.println("The request has been cancelled");
-//                        }
-//
-//                    });
-//        }
-//
-//        // Block the thread until all responses gotten
-//        countDownLatch.await();
-//
-//        return (Math.round(successCount.floatValue() / servers.size()) == 1);
-//    }
+    public boolean put(long key, String value) {
+        final CountDownLatch countDownLatch = new CountDownLatch(servers.size());
+        successCount = new AtomicInteger();
+
+        for (final String serverUrl : servers) {
+            Future<HttpResponse<JsonNode>> future = Unirest.post(serverUrl + "/cache/{key}/{value}")
+                    .header("accept", "application/json")
+                    .routeParam("key", Long.toString(key))
+                    .routeParam("value", value).asJson()
+                    .asJsonAsync(new Callback<JsonNode>() {
+
+                        public void failed(UnirestException e) {
+                            System.out.println("The request has failed: " + serverUrl);
+                            countDownLatch.countDown();
+                        }
+
+                        public void completed(HttpResponse<JsonNode> response) {
+                            int code = response.getCode();
+                            if (code == 200) {
+                                successCount.incrementAndGet();
+                            }
+
+                            countDownLatch.countDown();
+                        }
+
+                        public void cancelled() {
+                            System.out.println("The request has been cancelled");
+                        }
+
+                    });
+        }
+
+        // Block the thread until all responses gotten
+        countDownLatch.await();
+
+        return (Math.round(successCount.floatValue() / servers.size()) == 1);
+    }
 
 
 
