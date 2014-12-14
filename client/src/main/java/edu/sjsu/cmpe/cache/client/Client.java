@@ -11,7 +11,8 @@ public class Client {
         CRDTClient crdtClient = new CRDTClient();
 
         // First HTTP PUT call to store “a” to key 1. (Then, sleep for ~30 seconds so that you will have enough time to stop the server A)
-        crdtClient.put(1, "pooo");
+        boolean result = crdtClient.put(1, "poo");
+        System.out.println("result is " + result);
 //        sleep(30);
 //        System.out.println("Step 1: put(1 => a); sleeping 30s");
 //

@@ -17,7 +17,9 @@ import com.mashape.unirest.http.options.Options;
 public class CRDTClient  {
 
     private ArrayList<String> servers;
-    public AtomicInteger successCount;
+    private ArrayList<String> successServers;
+//    public AtomicInteger successCount;
+
 
     public CRDTClient() {
 
@@ -29,8 +31,9 @@ public class CRDTClient  {
 
 // Syncrhonous implementation
     public boolean put(long key, String value) {
+        successServers = new ArrayList(3);
+//        successCount = new AtomicInteger();
 
-        successCount = new AtomicInteger();
         for (final String serverUrl : servers) {
             HttpResponse<JsonNode> response = null;
             try {
@@ -43,16 +46,23 @@ public class CRDTClient  {
                 System.err.println(e);
             }
 
-            if (response.getCode() != 200) {
+            if (response == null || response.getStatus() != 200) {
                 System.out.println("Failed to add to the cache.");
             } else {
                 System.out.println("Added " + value + " to " + serverUrl);
-                successCount.incrementAndGet();
+                successServers.add(serverUrl);
+//                successCount.incrementAndGet();
             }
 
         }
 
-        return (Math.round(successCount.floatValue() / servers.size()) == 1);
+        boolean isSuccess = Math.round((float)successServers.size() / servers.size()) == 1;
+
+        if (! isSuccess) {
+            // Send delete for the same key
+            delete(key, value);
+        }
+        return isSuccess;
     }
 
 
@@ -65,9 +75,38 @@ public class CRDTClient  {
         } catch (UnirestException e) {
             System.err.println(e);
         }
-        String value = response.getBody().getObject().getString("value");
+
+        String value = null;
+        if (response != null && response.getStatus() == 200) {
+            value = response.getBody().getObject().getString("value");
+        }
 
         return value;
+    }
+
+    public void delete(long key, String value) {
+
+        for (final String serverUrl : successServers) {
+            HttpResponse<JsonNode> response = null;
+            try {
+                response = Unirest
+                        .delete(serverUrl + "/cache/{key}")
+                        .header("accept", "application/json")
+                        .routeParam("key", Long.toString(key)).asJson();
+            } catch (UnirestException e) {
+                System.err.println(e);
+            }
+
+            System.out.println("response is " + response);
+
+            if (response == null || response.getStatus() != 204) {
+                System.out.println("Failed to delete from the cache.");
+            } else {
+                System.out.println("Deleted " + value + " from " + serverUrl);
+
+            }
+
+        }
     }
 
 //    public boolean put(long key, String value) {
