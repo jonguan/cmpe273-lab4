@@ -6,6 +6,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
 import java.lang.*;
+import java.lang.InterruptedException;
 import java.io.*;
 import com.mashape.unirest.http.HttpResponse;
 import com.mashape.unirest.http.JsonNode;
@@ -15,30 +16,77 @@ import com.mashape.unirest.http.exceptions.UnirestException;
 import com.mashape.unirest.http.options.Options;
 
 
-public class CRDTClient  {
+public class CRDTClient implements CRDTCallbackInterface {
 
-    private ArrayList<String> servers;
+    private ConcurrentHashMap<String, CacheServiceInterface> servers;
     private ArrayList<String> successServers;
     private ConcurrentHashMap<String, ArrayList<String>> dictResults;
 
+    private static CountDownLatch countDownLatch;
+
     public CRDTClient() {
 
-        servers = new ArrayList(3);
-        servers.add("http://localhost:3000");
-        servers.add("http://localhost:3001");
-        servers.add("http://localhost:3002");
+        servers = new ConcurrentHashMap<String, CacheServiceInterface>(3);
+        CacheServiceInterface cache0 = new DistributedCacheService("http://localhost:3000", this);
+        CacheServiceInterface cache1 = new DistributedCacheService("http://localhost:3001", this);
+        CacheServiceInterface cache2 = new DistributedCacheService("http://localhost:3002", this);
+        servers.put("http://localhost:3000", cache0);
+        servers.put("http://localhost:3001", cache1);
+        servers.put("http://localhost:3002", cache2);
     }
 
-// Syncrhonous implementation
-    public boolean put(long key, String value) {
-        successServers = new ArrayList(3);
+    // Callbacks
+    @Override
+    public void putFailed(Exception e) {
+        System.out.println("The request has failed");
+        countDownLatch.countDown();
+    }
 
-        for (final String serverUrl : servers) {
-            boolean result = put(key, value, serverUrl);
-            if (result) {
-                successServers.add(serverUrl);
+    @Override
+    public void putCompleted(HttpResponse<JsonNode> response, String serverUrl) {
+        int code = response.getStatus();
+        System.out.println("completed the put response! code " + code + " on server " + serverUrl);
+        successServers.add(serverUrl);
+        countDownLatch.countDown();
+    }
+
+    @Override
+    public void getFailed(Exception e) {
+        System.out.println("The request has failed");
+        countDownLatch.countDown();
+    }
+
+    @Override
+    public void getCompleted(HttpResponse<JsonNode> response, String serverUrl) {
+
+        String value = null;
+        if (response != null && response.getStatus() == 200) {
+            value = response.getBody().getObject().getString("value");
+                System.out.println("value from server " + serverUrl + "is " + value);
+            ArrayList serversWithValue = dictResults.get(value);
+            if (serversWithValue == null) {
+                serversWithValue = new ArrayList(3);
             }
+            serversWithValue.add(serverUrl);
+
+            // Save Arraylist of servers into dictResults
+            dictResults.put(value, serversWithValue);
         }
+
+        countDownLatch.countDown();
+    }
+
+
+
+    public boolean put(long key, String value) throws InterruptedException {
+        successServers = new ArrayList(servers.size());
+        countDownLatch = new CountDownLatch(servers.size());
+
+        for (CacheServiceInterface cache : servers.values()) {
+            cache.put(key, value);
+        }
+
+        countDownLatch.await();
 
         boolean isSuccess = Math.round((float)successServers.size() / servers.size()) == 1;
 
@@ -49,64 +97,71 @@ public class CRDTClient  {
         return isSuccess;
     }
 
-    public boolean put (long key, String value, String serverUrl) {
-        HttpResponse<JsonNode> response = null;
-        try {
-            response = Unirest
-                    .put(serverUrl + "/cache/{key}/{value}")
-                    .header("accept", "application/json")
-                    .routeParam("key", Long.toString(key))
-                    .routeParam("value", value).asJson();
-        } catch (UnirestException e) {
-            System.err.println(e);
-        }
+    public void delete(long key, String value) {
 
-        if (response == null || response.getStatus() != 200) {
-            System.out.println("Failed to add to the cache.");
-            return false;
-        } else {
-            System.out.println("Added " + value + " to " + serverUrl);
-
-            return true;
+        for (final String serverUrl : successServers) {
+            CacheServiceInterface server = servers.get(serverUrl);
+            server.delete(key);
         }
     }
 
+
+
+// Syncrhonous implementation
+//    public boolean put(long key, String value) {
+//        successServers = new ArrayList(3);
+//
+//        for (final String serverUrl : servers) {
+//            boolean result = put(key, value, serverUrl);
+//            if (result) {
+//                successServers.add(serverUrl);
+//            }
+//        }
+//
+//        boolean isSuccess = Math.round((float)successServers.size() / servers.size()) == 1;
+//
+//        if (! isSuccess) {
+//            // Send delete for the same key
+//            delete(key, value);
+//        }
+//        return isSuccess;
+//    }
+//
+//    public boolean put (long key, String value, String serverUrl) {
+//        HttpResponse<JsonNode> response = null;
+//        try {
+//            response = Unirest
+//                    .put(serverUrl + "/cache/{key}/{value}")
+//                    .header("accept", "application/json")
+//                    .routeParam("key", Long.toString(key))
+//                    .routeParam("value", value).asJson();
+//        } catch (UnirestException e) {
+//            System.err.println(e);
+//        }
+//
+//        if (response == null || response.getStatus() != 200) {
+//            System.out.println("Failed to add to the cache.");
+//            return false;
+//        } else {
+//            System.out.println("Added " + value + " to " + serverUrl);
+//
+//            return true;
+//        }
+//    }
+
+
     // dictResult = {"value" : [serverUrl1, serverUrl2...]]}
-    public String get(long key) {
-
-        String rightValue = null;
+    public String get(long key) throws InterruptedException {
         dictResults = new ConcurrentHashMap<String, ArrayList<String>>();
+        countDownLatch = new CountDownLatch(servers.size());
 
-        for (final String serverUrl : servers) {
-            HttpResponse<JsonNode> response = null;
-            try {
-                response = Unirest.get(serverUrl + "/cache/{key}")
-                        .header("accept", "application/json")
-                        .routeParam("key", Long.toString(key)).asJson();
-            } catch (UnirestException e) {
-                System.err.println(e);
-            }
-
-            String value = null;
-            if (response != null && response.getStatus() == 200) {
-                value = response.getBody().getObject().getString("value");
-//                System.out.println("value from server " + serverUrl + "is " + value);
-                ArrayList serversWithValue = dictResults.get(value);
-                if (serversWithValue == null) {
-                    serversWithValue = new ArrayList(3);
-                }
-
-                serversWithValue.add(serverUrl);
-
-                // Save Arraylist of servers into dictResults
-                dictResults.put(value, serversWithValue);
-
-                // Initialize rightValue with something
-                rightValue = value;
-            }
+        for (final CacheServiceInterface server : servers.values()) {
+            server.get(key);
         }
+        countDownLatch.await();
 
-//        System.out.println("dictResults: " + dictResults);
+        // Take the first element
+        String rightValue = dictResults.keys().nextElement();
 
         // Discrepancy in results (either more than one value gotten, or null gotten somewhere)
         if (dictResults.keySet().size() > 1 || dictResults.get(rightValue).size() != servers.size()) {
@@ -117,14 +172,16 @@ public class CRDTClient  {
                 // Max value - iterate through dict keys to repair
                 rightValue = maxValues.get(0);
 
-                ArrayList<String> repairServers = new ArrayList(servers);
+                ArrayList<String> repairServers = new ArrayList(servers.keySet());
                 repairServers.removeAll(dictResults.get(rightValue));
 //                System.out.println("repairServers: " + repairServers);
 
                 for (String serverUrl : repairServers) {
                     // Repair all servers that don't have the correct value
                     System.out.println("repairing: " + serverUrl + " value: " + rightValue);
-                    put(key, rightValue, serverUrl);
+                    CacheServiceInterface server = servers.get(serverUrl);
+                    server.put(key, rightValue);
+
                 }
 
             } else {
@@ -132,9 +189,10 @@ public class CRDTClient  {
             }
         }
 
-
         return rightValue;
+
     }
+
 
     // Returns array of keys with the maximum value
     // If array contains only 1 value, then it is the highest value in the hash map
@@ -155,68 +213,6 @@ public class CRDTClient  {
         return maxKeys;
     }
 
-    public void delete(long key, String value) {
-
-        for (final String serverUrl : successServers) {
-            HttpResponse<JsonNode> response = null;
-            try {
-                response = Unirest
-                        .delete(serverUrl + "/cache/{key}")
-                        .header("accept", "application/json")
-                        .routeParam("key", Long.toString(key)).asJson();
-            } catch (UnirestException e) {
-                System.err.println(e);
-            }
-
-            System.out.println("response is " + response);
-
-            if (response == null || response.getStatus() != 204) {
-                System.out.println("Failed to delete from the cache.");
-            } else {
-                System.out.println("Deleted " + value + " from " + serverUrl);
-
-            }
-
-        }
-    }
-
-//    public boolean put(long key, String value) {
-//        final CountDownLatch countDownLatch = new CountDownLatch(servers.size());
-//        successCount = new AtomicInteger();
-//
-//        for (final String serverUrl : servers) {
-//            Future<HttpResponse<JsonNode>> future = Unirest.post(serverUrl + "/cache/{key}/{value}")
-//                    .header("accept", "application/json")
-//                    .routeParam("key", Long.toString(key))
-//                    .routeParam("value", value).asJson()
-//                    .asJsonAsync(new Callback<JsonNode>() {
-//
-//                        public void failed(UnirestException e) {
-//                            System.out.println("The request has failed: " + serverUrl);
-//                            countDownLatch.countDown();
-//                        }
-//
-//                        public void completed(HttpResponse<JsonNode> response) {
-//                            int code = response.getStatus();
-//                            if (code == 200) {
-//                                successCount.incrementAndGet();
-//                            }
-//
-//                            countDownLatch.countDown();
-//                        }
-//
-//                        public void cancelled() {
-//                            System.out.println("The request has been cancelled");
-//                        }
-//
-//                    });
-//        }
-//
-//        // Block the thread until all responses gotten
-//        countDownLatch.await();
-//
-//        return (Math.round(successCount.floatValue() / servers.size()) == 1);
-//    }
 
 
 
