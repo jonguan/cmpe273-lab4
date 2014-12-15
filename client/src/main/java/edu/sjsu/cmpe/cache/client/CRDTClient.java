@@ -57,10 +57,22 @@ public class CRDTClient implements CRDTCallbackInterface {
     }
 
     @Override
-    public void getCompleted(HttpResponse<JsonNode> response) {
-        int code = response.getStatus();
-        String value = response.getBody().getObject().getString("value");
-        System.out.println("completed the put response! code " + code + " value " + value);
+    public void getCompleted(HttpResponse<JsonNode> response, String serverUrl) {
+
+        String value = null;
+        if (response != null && response.getStatus() == 200) {
+            value = response.getBody().getObject().getString("value");
+                System.out.println("value from server " + serverUrl + "is " + value);
+            ArrayList serversWithValue = dictResults.get(value);
+            if (serversWithValue == null) {
+                serversWithValue = new ArrayList(3);
+            }
+            serversWithValue.add(serverUrl);
+
+            // Save Arraylist of servers into dictResults
+            dictResults.put(value, serversWithValue);
+        }
+
         countDownLatch.countDown();
     }
 
@@ -84,6 +96,16 @@ public class CRDTClient implements CRDTCallbackInterface {
         }
         return isSuccess;
     }
+
+    public void delete(long key, String value) {
+
+        for (final String serverUrl : successServers) {
+            CacheServiceInterface server = servers.get(serverUrl);
+            server.delete(key);
+        }
+    }
+
+
 
 // Syncrhonous implementation
 //    public boolean put(long key, String value) {
@@ -127,135 +149,70 @@ public class CRDTClient implements CRDTCallbackInterface {
 //        }
 //    }
 
+
     // dictResult = {"value" : [serverUrl1, serverUrl2...]]}
-//    public String get(long key) {
-//
-//        String rightValue = null;
-//        dictResults = new ConcurrentHashMap<String, ArrayList<String>>();
-//
-//        for (final String serverUrl : servers) {
-//            HttpResponse<JsonNode> response = null;
-//            try {
-//                response = Unirest.get(serverUrl + "/cache/{key}")
-//                        .header("accept", "application/json")
-//                        .routeParam("key", Long.toString(key)).asJson();
-//            } catch (UnirestException e) {
-//                System.err.println(e);
-//            }
-//
-//            String value = null;
-//            if (response != null && response.getStatus() == 200) {
-//                value = response.getBody().getObject().getString("value");
-////                System.out.println("value from server " + serverUrl + "is " + value);
-//                ArrayList serversWithValue = dictResults.get(value);
-//                if (serversWithValue == null) {
-//                    serversWithValue = new ArrayList(3);
-//                }
-//
-//                serversWithValue.add(serverUrl);
-//
-//                // Save Arraylist of servers into dictResults
-//                dictResults.put(value, serversWithValue);
-//
-//                // Initialize rightValue with something
-//                rightValue = value;
-//            }
-//        }
-//
-////        System.out.println("dictResults: " + dictResults);
-//
-//        // Discrepancy in results (either more than one value gotten, or null gotten somewhere)
-//        if (dictResults.keySet().size() > 1 || dictResults.get(rightValue).size() != servers.size()) {
-//            // Most frequent value in dictResults
-//            ArrayList<String> maxValues = maxKeyForTable(dictResults);
-////            System.out.println("maxValues: " + maxValues);
-//            if (maxValues.size() == 1) {
-//                // Max value - iterate through dict keys to repair
-//                rightValue = maxValues.get(0);
-//
-//                ArrayList<String> repairServers = new ArrayList(servers);
-//                repairServers.removeAll(dictResults.get(rightValue));
-////                System.out.println("repairServers: " + repairServers);
-//
-//                for (String serverUrl : repairServers) {
-//                    // Repair all servers that don't have the correct value
-//                    System.out.println("repairing: " + serverUrl + " value: " + rightValue);
-//                    put(key, rightValue, serverUrl);
-//                }
-//
-//            } else {
-//                // Multiple or no max keys? - do nothing
-//            }
-//        }
-//
-//
-//        return rightValue;
-//    }
-//
-//    // Returns array of keys with the maximum value
-//    // If array contains only 1 value, then it is the highest value in the hash map
-//    public ArrayList<String> maxKeyForTable(ConcurrentHashMap<String, ArrayList<String>> table) {
-//        ArrayList<String> maxKeys= new ArrayList<String>();
-//        int maxValue = -1;
-//        for(Map.Entry<String, ArrayList<String>> entry : table.entrySet()) {
-//            if(entry.getValue().size() > maxValue) {
-//                maxKeys.clear(); /* New max remove all current keys */
-//                maxKeys.add(entry.getKey());
-//                maxValue = entry.getValue().size();
-//            }
-//            else if(entry.getValue().size() == maxValue)
-//            {
-//                maxKeys.add(entry.getKey());
-//            }
-//        }
-//        return maxKeys;
-//    }
+    public String get(long key) throws InterruptedException {
+        dictResults = new ConcurrentHashMap<String, ArrayList<String>>();
+        countDownLatch = new CountDownLatch(servers.size());
 
-    public void delete(long key, String value) {
-
-        for (final String serverUrl : successServers) {
-            CacheServiceInterface server = servers.get(serverUrl);
-            server.delete(key);
+        for (final CacheServiceInterface server : servers.values()) {
+            server.get(key);
         }
+        countDownLatch.await();
+
+        // Take the first element
+        String rightValue = dictResults.keys().nextElement();
+
+        // Discrepancy in results (either more than one value gotten, or null gotten somewhere)
+        if (dictResults.keySet().size() > 1 || dictResults.get(rightValue).size() != servers.size()) {
+            // Most frequent value in dictResults
+            ArrayList<String> maxValues = maxKeyForTable(dictResults);
+//            System.out.println("maxValues: " + maxValues);
+            if (maxValues.size() == 1) {
+                // Max value - iterate through dict keys to repair
+                rightValue = maxValues.get(0);
+
+                ArrayList<String> repairServers = new ArrayList(servers.keySet());
+                repairServers.removeAll(dictResults.get(rightValue));
+//                System.out.println("repairServers: " + repairServers);
+
+                for (String serverUrl : repairServers) {
+                    // Repair all servers that don't have the correct value
+                    System.out.println("repairing: " + serverUrl + " value: " + rightValue);
+                    CacheServiceInterface server = servers.get(serverUrl);
+                    server.put(key, rightValue);
+
+                }
+
+            } else {
+                // Multiple or no max keys? - do nothing
+            }
+        }
+
+        return rightValue;
+
     }
 
-//    public boolean put(long key, String value) {
-//        final CountDownLatch countDownLatch = new CountDownLatch(servers.size());
-//        successCount = new AtomicInteger();
-//
-//        for (final String serverUrl : servers) {
-//            Future<HttpResponse<JsonNode>> future = Unirest.post(serverUrl + "/cache/{key}/{value}")
-//                    .header("accept", "application/json")
-//                    .routeParam("key", Long.toString(key))
-//                    .routeParam("value", value)
-//                    .asJsonAsync(new Callback<JsonNode>() {
-//
-//                        public void failed(UnirestException e) {
-//                            System.out.println("The request has failed: " + serverUrl);
-//                            countDownLatch.countDown();
-//                        }
-//
-//                        public void completed(HttpResponse<JsonNode> response) {
-//                            int code = response.getStatus();
-//                            if (code == 200) {
-//                                successCount.incrementAndGet();
-//                            }
-//
-//                            countDownLatch.countDown();
-//                        }
-//
-//                        public void cancelled() {
-//                            System.out.println("The request has been cancelled");
-//                        }
-//
-//                    });
-//        }
-//
-//        // Block the thread until all responses gotten
-//        countDownLatch.await();
-//
-//        return (Math.round(successCount.floatValue() / servers.size()) == 1);
-//    }
+
+    // Returns array of keys with the maximum value
+    // If array contains only 1 value, then it is the highest value in the hash map
+    public ArrayList<String> maxKeyForTable(ConcurrentHashMap<String, ArrayList<String>> table) {
+        ArrayList<String> maxKeys= new ArrayList<String>();
+        int maxValue = -1;
+        for(Map.Entry<String, ArrayList<String>> entry : table.entrySet()) {
+            if(entry.getValue().size() > maxValue) {
+                maxKeys.clear(); /* New max remove all current keys */
+                maxKeys.add(entry.getKey());
+                maxValue = entry.getValue().size();
+            }
+            else if(entry.getValue().size() == maxValue)
+            {
+                maxKeys.add(entry.getKey());
+            }
+        }
+        return maxKeys;
+    }
+
 
 
 

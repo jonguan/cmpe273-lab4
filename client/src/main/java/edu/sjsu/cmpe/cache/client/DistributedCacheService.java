@@ -43,7 +43,7 @@ public class DistributedCacheService implements CacheServiceInterface {
                     }
 
                     public void completed(HttpResponse<JsonNode> response) {
-                        callback.getCompleted(response);
+                        callback.getCompleted(response, cacheServerUrl);
                     }
 
                     public void cancelled() {
