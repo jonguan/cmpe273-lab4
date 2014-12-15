@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.concurrent.Future;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 import java.lang.*;
 import java.io.*;
 import com.mashape.unirest.http.HttpResponse;
@@ -18,8 +19,7 @@ public class CRDTClient  {
 
     private ArrayList<String> servers;
     private ArrayList<String> successServers;
-//    public AtomicInteger successCount;
-
+    private ConcurrentHashMap<String, ArrayList<String>> dictResults;
 
     public CRDTClient() {
 
@@ -32,28 +32,12 @@ public class CRDTClient  {
 // Syncrhonous implementation
     public boolean put(long key, String value) {
         successServers = new ArrayList(3);
-//        successCount = new AtomicInteger();
 
         for (final String serverUrl : servers) {
-            HttpResponse<JsonNode> response = null;
-            try {
-                response = Unirest
-                        .put(serverUrl + "/cache/{key}/{value}")
-                        .header("accept", "application/json")
-                        .routeParam("key", Long.toString(key))
-                        .routeParam("value", value).asJson();
-            } catch (UnirestException e) {
-                System.err.println(e);
-            }
-
-            if (response == null || response.getStatus() != 200) {
-                System.out.println("Failed to add to the cache.");
-            } else {
-                System.out.println("Added " + value + " to " + serverUrl);
+            boolean result = put(key, value, serverUrl);
+            if (result) {
                 successServers.add(serverUrl);
-//                successCount.incrementAndGet();
             }
-
         }
 
         boolean isSuccess = Math.round((float)successServers.size() / servers.size()) == 1;
@@ -65,23 +49,106 @@ public class CRDTClient  {
         return isSuccess;
     }
 
-
-    public String get(long key) {
+    public boolean put (long key, String value, String serverUrl) {
         HttpResponse<JsonNode> response = null;
         try {
-            response = Unirest.get(servers.get(0) + "/cache/{key}")
+            response = Unirest
+                    .put(serverUrl + "/cache/{key}/{value}")
                     .header("accept", "application/json")
-                    .routeParam("key", Long.toString(key)).asJson();
+                    .routeParam("key", Long.toString(key))
+                    .routeParam("value", value).asJson();
         } catch (UnirestException e) {
             System.err.println(e);
         }
 
-        String value = null;
-        if (response != null && response.getStatus() == 200) {
-            value = response.getBody().getObject().getString("value");
+        if (response == null || response.getStatus() != 200) {
+            System.out.println("Failed to add to the cache.");
+            return false;
+        } else {
+            System.out.println("Added " + value + " to " + serverUrl);
+
+            return true;
+        }
+    }
+
+    // dictResult = {"value" : [serverUrl1, serverUrl2...]]}
+    public String get(long key) {
+
+        String rightValue = null;
+        dictResults = new ConcurrentHashMap<String, ArrayList<String>>();
+
+        for (final String serverUrl : servers) {
+            HttpResponse<JsonNode> response = null;
+            try {
+                response = Unirest.get(servers.get(0) + "/cache/{key}")
+                        .header("accept", "application/json")
+                        .routeParam("key", Long.toString(key)).asJson();
+            } catch (UnirestException e) {
+                System.err.println(e);
+            }
+
+            String value = null;
+            if (response != null && response.getStatus() == 200) {
+                value = response.getBody().getObject().getString("value");
+                ArrayList serversWithValue = null;
+                try {
+                    serversWithValue = dictResults.get(value);
+                } catch (Exception e) {
+                    serversWithValue = new ArrayList(3);
+                }
+                serversWithValue.add(serverUrl);
+
+                // Save Arraylist of servers into dictResults
+                dictResults.put(value, serversWithValue);
+
+                // Initialize rightValue with something
+                rightValue = value;
+            }
         }
 
-        return value;
+
+        // Discrepancy in results
+        if (dictResults.keySet().size() > 1) {
+            // Most frequent value in dictResults
+            ArrayList<String> maxKeys = maxKeyForTable(dictResults);
+            if (maxKeys.size() == 1) {
+                // Max value - iterate through dict keys to repair
+                rightValue = maxKeys.get(0);
+                for(Map.Entry<String, ArrayList<String>> entry : dictResults.entrySet()) {
+                    if (entry.getKey() != rightValue) {
+                        for (String serverUrl : entry.getValue()) {
+                            // Repair all servers that don't have the correct value
+                            put(key, rightValue, serverUrl);
+                        }
+
+                    }
+                }
+            } else {
+                // Multiple or no max keys? - do nothing
+            }
+        }
+
+
+        return rightValue;
+    }
+
+    // Returns array of keys with the maximum value
+    // If array contains only 1 value, then it is the highest value in the hash map
+    public ArrayList<String> maxKeyForTable(ConcurrentHashMap<String, ArrayList<String>> table) {
+        ArrayList<String> maxKeys= new ArrayList<String>();
+        int maxValue = -1;
+        for(Map.Entry<String, ArrayList<String>> entry : table.entrySet()) {
+            if(entry.getValue().size() > maxValue) {
+                maxKeys.clear(); /* New max remove all current keys */
+                maxKeys.add(entry.getKey());
+                maxValue = entry.getValue().size();
+            }
+            else if(entry.getValue().size() == maxValue)
+            {
+                maxKeys.add(entry.getKey());
+            }
+        }
+        return maxKeys;
     }
 
     public void delete(long key, String value) {
