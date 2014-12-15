@@ -1,9 +1,15 @@
 package edu.sjsu.cmpe.cache.client;
 
+import java.util.concurrent.Future;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 import com.mashape.unirest.http.HttpResponse;
 import com.mashape.unirest.http.JsonNode;
 import com.mashape.unirest.http.Unirest;
+import com.mashape.unirest.http.async.Callback;
 import com.mashape.unirest.http.exceptions.UnirestException;
+import com.mashape.unirest.http.options.Options;
 
 /**
  * Distributed cache service
@@ -12,8 +18,13 @@ import com.mashape.unirest.http.exceptions.UnirestException;
 public class DistributedCacheService implements CacheServiceInterface {
     private final String cacheServerUrl;
 
+    private CRDTCallbackInterface callback;
     public DistributedCacheService(String serverUrl) {
         this.cacheServerUrl = serverUrl;
+    }
+    public DistributedCacheService(String serverUrl, CRDTCallbackInterface callbk) {
+        this.cacheServerUrl = serverUrl;
+        this.callback = callbk;
     }
 
     /**
@@ -40,19 +51,26 @@ public class DistributedCacheService implements CacheServiceInterface {
      */
     @Override
     public void put(long key, String value) {
-        HttpResponse<JsonNode> response = null;
-        try {
-            response = Unirest
-                    .put(this.cacheServerUrl + "/cache/{key}/{value}")
-                    .header("accept", "application/json")
-                    .routeParam("key", Long.toString(key))
-                    .routeParam("value", value).asJson();
-        } catch (UnirestException e) {
-            System.err.println(e);
-        }
+        Future<HttpResponse<JsonNode>> future = Unirest.put(this.cacheServerUrl + "/cache/{key}/{value}")
+                .header("accept", "application/json")
+                .routeParam("key", Long.toString(key))
+                .routeParam("value", value)
+                .asJsonAsync(new Callback<JsonNode>() {
 
-        if (response.getStatus() != 200) {
-            System.out.println("Failed to add to the cache.");
-        }
+                    public void failed(UnirestException e) {
+                        System.out.println("The request has failed");
+                        callback.failed(e);
+                    }
+
+                    public void completed(HttpResponse<JsonNode> response) {
+                        int code = response.getStatus();
+                        callback.completed(response);
+                    }
+
+                    public void cancelled() {
+                        System.out.println("The request has been cancelled");
+                    }
+
+                });
     }
 }
