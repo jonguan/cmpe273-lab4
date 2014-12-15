@@ -14,14 +14,14 @@ public class Client {
         // Result : a a a
         boolean result = crdtClient.put(1, "a");
         System.out.println("result is " + result);
-        Thread.sleep(30*1000);
+        Thread.sleep(20*1000);
         System.out.println("Step 1: put(1 => a); sleeping 30s");
 
 
         // Second HTTP PUT call to update key 1 value to “b”. (Then, sleep again for another ~30 seconds while bringing the server A back)
         // Result: null b b
         crdtClient.put(1, "b");
-        Thread.sleep(30*1000);
+        Thread.sleep(20*1000);
         System.out.println("Step 2: put(1 => b); sleeping 30s");
 
 

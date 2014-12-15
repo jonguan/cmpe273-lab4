@@ -80,7 +80,7 @@ public class CRDTClient  {
         for (final String serverUrl : servers) {
             HttpResponse<JsonNode> response = null;
             try {
-                response = Unirest.get(servers.get(0) + "/cache/{key}")
+                response = Unirest.get(serverUrl + "/cache/{key}")
                         .header("accept", "application/json")
                         .routeParam("key", Long.toString(key)).asJson();
             } catch (UnirestException e) {
@@ -90,12 +90,12 @@ public class CRDTClient  {
             String value = null;
             if (response != null && response.getStatus() == 200) {
                 value = response.getBody().getObject().getString("value");
-                ArrayList serversWithValue = null;
-                try {
-                    serversWithValue = dictResults.get(value);
-                } catch (Exception e) {
+//                System.out.println("value from server " + serverUrl + "is " + value);
+                ArrayList serversWithValue = dictResults.get(value);
+                if (serversWithValue == null) {
                     serversWithValue = new ArrayList(3);
                 }
+
                 serversWithValue.add(serverUrl);
 
                 // Save Arraylist of servers into dictResults
@@ -106,23 +106,27 @@ public class CRDTClient  {
             }
         }
 
+//        System.out.println("dictResults: " + dictResults);
 
-        // Discrepancy in results
-        if (dictResults.keySet().size() > 1) {
+        // Discrepancy in results (either more than one value gotten, or null gotten somewhere)
+        if (dictResults.keySet().size() > 1 || dictResults.get(rightValue).size() != servers.size()) {
             // Most frequent value in dictResults
-            ArrayList<String> maxKeys = maxKeyForTable(dictResults);
-            if (maxKeys.size() == 1) {
+            ArrayList<String> maxValues = maxKeyForTable(dictResults);
+//            System.out.println("maxValues: " + maxValues);
+            if (maxValues.size() == 1) {
                 // Max value - iterate through dict keys to repair
-                rightValue = maxKeys.get(0);
-                for(Map.Entry<String, ArrayList<String>> entry : dictResults.entrySet()) {
-                    if (entry.getKey() != rightValue) {
-                        for (String serverUrl : entry.getValue()) {
-                            // Repair all servers that don't have the correct value
-                            put(key, rightValue, serverUrl);
-                        }
+                rightValue = maxValues.get(0);
 
-                    }
+                ArrayList<String> repairServers = new ArrayList(servers);
+                repairServers.removeAll(dictResults.get(rightValue));
+//                System.out.println("repairServers: " + repairServers);
+
+                for (String serverUrl : repairServers) {
+                    // Repair all servers that don't have the correct value
+                    System.out.println("repairing: " + serverUrl + " value: " + rightValue);
+                    put(key, rightValue, serverUrl);
                 }
+
             } else {
                 // Multiple or no max keys? - do nothing
             }
