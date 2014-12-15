@@ -19,6 +19,7 @@ public class DistributedCacheService implements CacheServiceInterface {
     private final String cacheServerUrl;
 
     private CRDTCallbackInterface callback;
+
     public DistributedCacheService(String serverUrl) {
         this.cacheServerUrl = serverUrl;
     }
@@ -32,17 +33,26 @@ public class DistributedCacheService implements CacheServiceInterface {
      */
     @Override
     public String get(long key) {
-        HttpResponse<JsonNode> response = null;
-        try {
-            response = Unirest.get(this.cacheServerUrl + "/cache/{key}")
-                    .header("accept", "application/json")
-                    .routeParam("key", Long.toString(key)).asJson();
-        } catch (UnirestException e) {
-            System.err.println(e);
-        }
-        String value = response.getBody().getObject().getString("value");
+        Future<HttpResponse<JsonNode>> future = Unirest.get(this.cacheServerUrl + "/cache/{key}")
+                .header("accept", "application/json")
+                .routeParam("key", Long.toString(key))
+                .asJsonAsync(new Callback<JsonNode>() {
 
-        return value;
+                    public void failed(UnirestException e) {
+                        callback.getFailed(e);
+                    }
+
+                    public void completed(HttpResponse<JsonNode> response) {
+                        callback.getCompleted(response);
+                    }
+
+                    public void cancelled() {
+                        System.out.println("The request has been cancelled");
+                    }
+
+                });
+
+        return null;
     }
 
     /**
@@ -58,13 +68,14 @@ public class DistributedCacheService implements CacheServiceInterface {
                 .asJsonAsync(new Callback<JsonNode>() {
 
                     public void failed(UnirestException e) {
-                        System.out.println("The request has failed");
-                        callback.failed(e);
+//                        System.out.println("The request has failed");
+                        callback.putFailed(e);
                     }
 
                     public void completed(HttpResponse<JsonNode> response) {
-                        int code = response.getStatus();
-                        callback.completed(response);
+//                        int code = response.getStatus();
+//                        System.out.println("received code " + code);
+                        callback.putCompleted(response, cacheServerUrl);
                     }
 
                     public void cancelled() {
@@ -72,5 +83,28 @@ public class DistributedCacheService implements CacheServiceInterface {
                     }
 
                 });
+    }
+
+    @Override
+    public void delete(long key) {
+        HttpResponse<JsonNode> response = null;
+        try {
+            response = Unirest
+                    .delete(this.cacheServerUrl + "/cache/{key}")
+                    .header("accept", "application/json")
+                    .routeParam("key", Long.toString(key))
+                    .asJson();
+        } catch (UnirestException e) {
+            System.err.println(e);
+        }
+
+        System.out.println("response is " + response);
+
+        if (response == null || response.getStatus() != 204) {
+            System.out.println("Failed to delete from the cache.");
+        } else {
+            System.out.println("Deleted " + key + " from " + this.cacheServerUrl);
+        }
+
     }
 }

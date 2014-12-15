@@ -1,5 +1,7 @@
 package edu.sjsu.cmpe.cache.client;
 
+import com.mashape.unirest.http.Unirest;
+
 import java.util.*;
 import java.lang.*;
 import java.io.*;
@@ -20,7 +22,7 @@ public class Client {
 
         // Second HTTP PUT call to update key 1 value to “b”. (Then, sleep again for another ~30 seconds while bringing the server A back)
         // Result: null b b
-        crdtClient.put(1, "boob");
+        crdtClient.put(1, "bob");
 //        Thread.sleep(20*1000);
 //        System.out.println("Step 2: put(1 => b); sleeping 30s");
 //
@@ -31,6 +33,8 @@ public class Client {
 //        System.out.println("Step 3: get(1) => " + value);
 
         System.out.println("Exiting Client...");
+        Unirest.shutdown();
+//        System.exit(0);
     }
 
 }

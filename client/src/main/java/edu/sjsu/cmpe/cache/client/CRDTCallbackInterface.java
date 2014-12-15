@@ -5,7 +5,9 @@ import com.mashape.unirest.http.JsonNode;
 
 public interface CRDTCallbackInterface {
 
-    void completed (HttpResponse<JsonNode> response);
+    void putCompleted (HttpResponse<JsonNode> response, String serverUrl);
+    void getCompleted (HttpResponse<JsonNode> response);
 
-    void failed (Exception e);
+    void putFailed (Exception e);
+    void getFailed (Exception e);
 }

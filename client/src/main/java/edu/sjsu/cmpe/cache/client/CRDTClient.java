@@ -18,48 +18,71 @@ import com.mashape.unirest.http.options.Options;
 
 public class CRDTClient implements CRDTCallbackInterface {
 
-    private ArrayList<CacheServiceInterface> servers;
+    private ConcurrentHashMap<String, CacheServiceInterface> servers;
     private ArrayList<String> successServers;
     private ConcurrentHashMap<String, ArrayList<String>> dictResults;
 
-    private CountDownLatch countDownLatch;
+    private static CountDownLatch countDownLatch;
 
     public CRDTClient() {
 
-        servers = new ArrayList(3);
+        servers = new ConcurrentHashMap<String, CacheServiceInterface>(3);
         CacheServiceInterface cache0 = new DistributedCacheService("http://localhost:3000", this);
         CacheServiceInterface cache1 = new DistributedCacheService("http://localhost:3001", this);
         CacheServiceInterface cache2 = new DistributedCacheService("http://localhost:3002", this);
-        servers.add(cache0);
-        servers.add(cache1);
-        servers.add(cache2);
+        servers.put("http://localhost:3000", cache0);
+        servers.put("http://localhost:3001", cache1);
+        servers.put("http://localhost:3002", cache2);
     }
-
 
     // Callbacks
     @Override
-    public void failed(Exception e) {
+    public void putFailed(Exception e) {
         System.out.println("The request has failed");
         countDownLatch.countDown();
     }
 
     @Override
-    public void completed(HttpResponse<JsonNode> response) {
+    public void putCompleted(HttpResponse<JsonNode> response, String serverUrl) {
         int code = response.getStatus();
-        System.out.println("completed the response! code " + code);
+        System.out.println("completed the put response! code " + code + " on server " + serverUrl);
+        successServers.add(serverUrl);
+        countDownLatch.countDown();
+    }
+
+    @Override
+    public void getFailed(Exception e) {
+        System.out.println("The request has failed");
+        countDownLatch.countDown();
+    }
+
+    @Override
+    public void getCompleted(HttpResponse<JsonNode> response) {
+        int code = response.getStatus();
+        String value = response.getBody().getObject().getString("value");
+        System.out.println("completed the put response! code " + code + " value " + value);
         countDownLatch.countDown();
     }
 
 
+
     public boolean put(long key, String value) throws InterruptedException {
+        successServers = new ArrayList(servers.size());
         countDownLatch = new CountDownLatch(servers.size());
 
-        for (CacheServiceInterface cache : servers) {
+        for (CacheServiceInterface cache : servers.values()) {
             cache.put(key, value);
         }
 
         countDownLatch.await();
-        return true;
+
+        boolean isSuccess = Math.round((float)successServers.size() / servers.size()) == 1;
+
+        if (! isSuccess) {
+            // Send delete for the same key
+            delete(key, value);
+        }
+        return isSuccess;
     }
 
 // Syncrhonous implementation
@@ -191,25 +214,8 @@ public class CRDTClient implements CRDTCallbackInterface {
     public void delete(long key, String value) {
 
         for (final String serverUrl : successServers) {
-            HttpResponse<JsonNode> response = null;
-            try {
-                response = Unirest
-                        .delete(serverUrl + "/cache/{key}")
-                        .header("accept", "application/json")
-                        .routeParam("key", Long.toString(key)).asJson();
-            } catch (UnirestException e) {
-                System.err.println(e);
-            }
-
-            System.out.println("response is " + response);
-
-            if (response == null || response.getStatus() != 204) {
-                System.out.println("Failed to delete from the cache.");
-            } else {
-                System.out.println("Deleted " + value + " from " + serverUrl);
-
-            }
-
+            CacheServiceInterface server = servers.get(serverUrl);
+            server.delete(key);
         }
     }
 
