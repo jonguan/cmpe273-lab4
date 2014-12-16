@@ -106,50 +106,6 @@ public class CRDTClient implements CRDTCallbackInterface {
     }
 
 
-
-// Syncrhonous implementation
-//    public boolean put(long key, String value) {
-//        successServers = new ArrayList(3);
-//
-//        for (final String serverUrl : servers) {
-//            boolean result = put(key, value, serverUrl);
-//            if (result) {
-//                successServers.add(serverUrl);
-//            }
-//        }
-//
-//        boolean isSuccess = Math.round((float)successServers.size() / servers.size()) == 1;
-//
-//        if (! isSuccess) {
-//            // Send delete for the same key
-//            delete(key, value);
-//        }
-//        return isSuccess;
-//    }
-//
-//    public boolean put (long key, String value, String serverUrl) {
-//        HttpResponse<JsonNode> response = null;
-//        try {
-//            response = Unirest
-//                    .put(serverUrl + "/cache/{key}/{value}")
-//                    .header("accept", "application/json")
-//                    .routeParam("key", Long.toString(key))
-//                    .routeParam("value", value).asJson();
-//        } catch (UnirestException e) {
-//            System.err.println(e);
-//        }
-//
-//        if (response == null || response.getStatus() != 200) {
-//            System.out.println("Failed to add to the cache.");
-//            return false;
-//        } else {
-//            System.out.println("Added " + value + " to " + serverUrl);
-//
-//            return true;
-//        }
-//    }
-
-
     // dictResult = {"value" : [serverUrl1, serverUrl2...]]}
     public String get(long key) throws InterruptedException {
         dictResults = new ConcurrentHashMap<String, ArrayList<String>>();
